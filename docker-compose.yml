@@ -1,0 +1,109 @@
+services:
+  # Backend API (FastAPI)
+  api:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: immagic-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://immagic:immagic_password@db:5432/immagic_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SECRET_KEY=change_this_in_production_secret_key
+      - UPLOAD_DIR=/data/uploads
+    volumes:
+      - ./backend:/app
+      - ./data/uploads:/data/uploads
+    depends_on:
+      - db
+      - redis
+    networks:
+      - immagic-network
+    restart: unless-stopped
+
+  # Celery Worker (OCR & Background Tasks)
+  worker:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: immagic-worker
+    command: celery -A app.worker.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgres://immagic:immagic_password@db:5432/immagic_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - UPLOAD_DIR=/data/uploads
+    volumes:
+      - ./backend:/app
+      - ./data/uploads:/data/uploads
+    depends_on:
+      - db
+      - redis
+    networks:
+      - immagic-network
+    restart: unless-stopped
+
+  # Frontend (React + Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: immagic-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - immagic-network
+    restart: unless-stopped
+
+  # Database (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    container_name: immagic-db
+    environment:
+      - POSTGRES_USER=immagic
+      - POSTGRES_PASSWORD=immagic_password
+      - POSTGRES_DB=immagic_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - immagic-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U immagic -d immagic_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis (Cache & Broker)
+  redis:
+    image: redis:7-alpine
+    container_name: immagic-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - immagic-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+networks:
+  immagic-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
