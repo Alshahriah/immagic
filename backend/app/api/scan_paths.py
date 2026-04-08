@@ -1,3 +1,4 @@
+import os
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Body
 from app.models.scan_path import ScanPath
@@ -14,6 +15,38 @@ async def get_scan_paths(
     current_user: User = Depends(get_current_user)
 ):
     return await ScanPath.all().order_by("-created_at")
+
+@router.get("/list-dirs")
+async def list_directories(
+    path: str = "/",
+    current_user: User = Depends(get_current_user)
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can browse directories")
+    
+    if not os.path.exists(path):
+         raise HTTPException(status_code=404, detail="Path does not exist")
+    
+    if not os.path.isdir(path):
+         raise HTTPException(status_code=400, detail="Path is not a directory")
+
+    try:
+        items = []
+        for item in os.listdir(path):
+            full_path = os.path.join(path, item)
+            if os.path.isdir(full_path):
+                items.append({
+                    "name": item,
+                    "path": full_path,
+                    "type": "directory"
+                })
+        return {
+            "current_path": os.path.abspath(path),
+            "parent_path": os.path.dirname(os.path.abspath(path)),
+            "items": sorted(items, key=lambda x: x["name"].lower())
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/", response_model=ScanPathResponse)
 async def create_scan_path(

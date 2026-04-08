@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import api from "@/lib/api"
 import { Card } from "@/components/ui/card"
 import { Lightbox } from "@/components/lightbox"
 import { useSearchParams } from "react-router-dom"
-import { useAuthStore } from "@/lib/store"
+import { motion, AnimatePresence } from "framer-motion"
+import { Search, Loader2, Calendar } from "lucide-react"
 
 interface Image {
   id: number
@@ -11,6 +12,12 @@ interface Image {
   path: string
   thumbnail_path?: string
   ocr_text?: string
+  created_at?: string // Assuming this exists or can be inferred
+}
+
+interface GroupedImages {
+  date: string
+  images: Image[]
 }
 
 export function Dashboard() {
@@ -19,7 +26,6 @@ export function Dashboard() {
   const [selectedImage, setSelectedImage] = useState<Image | null>(null)
   const [searchParams] = useSearchParams()
   const q = searchParams.get("q")
-  const token = useAuthStore((state) => state.token)
 
   useEffect(() => {
     const fetchImages = async () => {
@@ -37,49 +43,107 @@ export function Dashboard() {
     fetchImages()
   }, [q])
 
-  // Helper to get authorized image URL (this is a simple trick, 
-  // ideally we use a signed URL or pass auth token in img request if possible, 
-  // but standard <img> tags don't support headers easily.
-  // For this local app, we'll assume the browser cookie/session or just append token if needed,
-  // BUT we are using JWT in header. 
-  // Workaround: We can use a blob URL by fetching with axios, OR assume the image endpoint allows query param auth.
-  // Let's implement a simple fetch-to-blob component or just use the URL directly if we allow public access or query param token.
-  // We'll update backend to allow query param token for images? Or just fetch blob.
-  // Fetching blob is safer.
-  
-  if (loading) return <div className="p-8 text-center text-muted-foreground">Loading images...</div>
+  const groupedImages = useMemo(() => {
+    const groups: { [key: string]: Image[] } = {}
+    
+    images.forEach(image => {
+      const date = image.created_at ? new Date(image.created_at).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      }) : 'Recent'
+      
+      if (!groups[date]) groups[date] = []
+      groups[date].push(image)
+    })
+
+    return Object.entries(groups).map(([date, imgs]) => ({
+      date,
+      images: imgs
+    }))
+  }, [images])
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold tracking-tight">
-            {q ? `Search Results: "${q}"` : "Photos"}
-        </h1>
-        <div className="text-sm text-muted-foreground">{images.length} result(s)</div>
+    <div className="space-y-12 pb-24">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 sticky top-0 bg-background/80 backdrop-blur-xl z-10 py-6 -mx-4 px-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">
+              {q ? `Search Results` : "Photos"}
+          </h1>
+          {q && <p className="text-muted-foreground flex items-center gap-2 text-sm">
+            <Search className="w-3.5 h-3.5" /> Showing results for "{q}"
+          </p>}
+        </div>
+        <div className="text-xs font-medium text-muted-foreground">
+          {images.length} {images.length === 1 ? 'item' : 'items'}
+        </div>
       </div>
       
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-        {images.map((image) => (
-          <Card 
-            key={image.id} 
-            className="overflow-hidden group cursor-pointer hover:shadow-lg transition-all"
-            onClick={() => setSelectedImage(image)}
-          >
-             <div className="aspect-square bg-muted relative">
-                <AuthenticatedImage 
-                    src={`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/images/${image.id}/file`}
-                    alt={image.filename}
-                    className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                />
-             </div>
-          </Card>
-        ))}
-        {images.length === 0 && (
-          <div className="col-span-full py-12 text-center text-muted-foreground">
-            No images found.
-          </div>
-        )}
-      </div>
+      {loading ? (
+        <div className="h-64 flex flex-col items-center justify-center gap-4 text-muted-foreground animate-in fade-in duration-500">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-sm font-medium">Loading your library...</p>
+        </div>
+      ) : (
+        <div className="space-y-12">
+          {groupedImages.map((group) => (
+            <section key={group.date} className="space-y-4">
+              <div className="flex items-center gap-4 sticky top-24 z-10 bg-background/80 backdrop-blur-md py-2">
+                <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">{group.date}</h2>
+                <div className="flex-1 h-px bg-border/50" />
+              </div>
+              
+              <motion.div 
+                layout
+                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-1 md:gap-2"
+              >
+                <AnimatePresence>
+                  {group.images.map((image, index) => (
+                    <motion.div
+                      key={image.id}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <div 
+                        className="group relative aspect-square overflow-hidden bg-muted cursor-pointer ring-0 hover:ring-4 ring-primary/20 transition-all duration-300"
+                        onClick={() => setSelectedImage(image)}
+                      >
+                        <AuthenticatedImage 
+                          src={`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/images/${image.id}/file`}
+                          alt={image.filename}
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </motion.div>
+            </section>
+          ))}
+          
+          {images.length === 0 && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="py-20 flex flex-col items-center justify-center text-center space-y-4"
+            >
+              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                <Search className="w-8 h-8 text-muted-foreground" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xl font-semibold">No images found</h3>
+                <p className="text-muted-foreground max-w-xs">
+                  We couldn't find any images matching your criteria.
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </div>
+      )}
 
       {selectedImage && (
         <Lightbox 
@@ -91,9 +155,9 @@ export function Dashboard() {
   )
 }
 
-// Simple component to fetch image with Auth header and render
 function AuthenticatedImage({ src, alt, className }: { src: string, alt: string, className?: string }) {
     const [objectUrl, setObjectUrl] = useState<string | null>(null)
+    const [isLoaded, setIsLoaded] = useState(false)
 
     useEffect(() => {
         let active = true
@@ -104,7 +168,7 @@ function AuthenticatedImage({ src, alt, className }: { src: string, alt: string,
                    setObjectUrl(url)
                }
            })
-           .catch(() => {}) // Handle error silently or show placeholder
+           .catch(() => {})
         
         return () => {
             active = false
@@ -112,7 +176,19 @@ function AuthenticatedImage({ src, alt, className }: { src: string, alt: string,
         }
     }, [src])
 
-    if (!objectUrl) return <div className="w-full h-full bg-muted flex items-center justify-center text-xs text-muted-foreground p-2 break-all">{alt}</div>
+    if (!objectUrl) return (
+      <div className="w-full h-full bg-muted flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/30" />
+      </div>
+    )
 
-    return <img src={objectUrl} alt={alt} className={className} loading="lazy" />
+    return (
+      <img 
+        src={objectUrl} 
+        alt={alt} 
+        className={`${className} ${isLoaded ? 'opacity-100' : 'opacity-0'} transition-opacity duration-500`} 
+        onLoad={() => setIsLoaded(true)}
+        loading="lazy" 
+      />
+    )
 }

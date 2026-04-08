@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import api from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
-import { Trash2, FolderPlus, FileText } from "lucide-react"
+import { Trash2, FolderPlus, FileText, FolderSearch, ChevronRight, ChevronLeft } from "lucide-react"
 
 interface ScanPath {
     id: number
@@ -16,6 +16,18 @@ interface Stats {
     pending_ocr: number
 }
 
+interface DirItem {
+    name: string
+    path: string
+    type: string
+}
+
+interface DirResponse {
+    current_path: string
+    parent_path: string
+    items: DirItem[]
+}
+
 export function SettingsPage() {
   const [path, setPath] = useState("")
   const [scanning, setScanning] = useState(false)
@@ -23,6 +35,11 @@ export function SettingsPage() {
   const [message, setMessage] = useState("")
   const [paths, setPaths] = useState<ScanPath[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
+  
+  // Explorer state
+  const [showExplorer, setShowExplorer] = useState(false)
+  const [currentDir, setCurrentDir] = useState<DirResponse | null>(null)
+  const [explorerPath, setExplorerPath] = useState("/")
 
   const fetchPaths = async () => {
       try {
@@ -36,6 +53,17 @@ export function SettingsPage() {
           const { data } = await api.get("/images/stats")
           setStats(data)
       } catch (e) { console.error(e) }
+  }
+
+  const fetchDir = async (newPath: string) => {
+    try {
+        const { data } = await api.get(`/scan-paths/list-dirs?path=${encodeURIComponent(newPath)}`)
+        setCurrentDir(data)
+        setExplorerPath(data.current_path)
+    } catch (e) {
+        console.error(e)
+        setMessage("Could not list directories for: " + newPath)
+    }
   }
 
   useEffect(() => {
@@ -84,6 +112,18 @@ export function SettingsPage() {
       }
   }
 
+  const handleSelectFolder = () => {
+    setShowExplorer(!showExplorer)
+    if (!showExplorer && !currentDir) {
+        fetchDir(explorerPath)
+    }
+  }
+
+  const handleSelectDir = (p: string) => {
+    setPath(p)
+    setShowExplorer(false)
+  }
+
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
@@ -130,20 +170,81 @@ export function SettingsPage() {
                 Add Scan Directory
               </label>
               <p className="text-sm text-muted-foreground">
-                Enter the absolute path to a folder on the server.
+                Select a folder on the server to scan for images.
               </p>
               <div className="flex w-full max-w-lg items-center space-x-2">
-                <Input 
-                    type="text" 
-                    placeholder="/path/to/images" 
-                    value={path}
-                    onChange={(e) => setPath(e.target.value)}
-                />
+                <div className="relative flex-1">
+                    <Input 
+                        type="text" 
+                        placeholder="/path/to/images" 
+                        value={path}
+                        onChange={(e) => setPath(e.target.value)}
+                        className="pr-10"
+                    />
+                    <button 
+                        onClick={handleSelectFolder}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        title="Browse Server Folders"
+                    >
+                        <FolderSearch className="h-4 w-4" />
+                    </button>
+                </div>
                 <Button onClick={handleAddPath} disabled={scanning}>
                     <FolderPlus className="mr-2 h-4 w-4" />
                     {scanning ? "Scanning..." : "Add Path"}
                 </Button>
               </div>
+
+              {showExplorer && currentDir && (
+                <div className="mt-4 border rounded-lg bg-muted/30 overflow-hidden max-w-lg animate-in fade-in slide-in-from-top-2">
+                    <div className="p-2 bg-muted border-b flex items-center justify-between">
+                        <span className="text-xs font-mono truncate max-w-[80%]">{explorerPath}</span>
+                        <Button variant="ghost" size="sm" onClick={() => fetchDir(currentDir.parent_path)} className="h-7 px-2">
+                            <ChevronLeft className="h-3 w-3 mr-1" />
+                            Up
+                        </Button>
+                    </div>
+                    <div className="max-h-60 overflow-y-auto p-1">
+                        {currentDir.items.map((item) => (
+                            <div 
+                                key={item.path} 
+                                className="flex items-center justify-between p-2 hover:bg-primary/5 rounded cursor-pointer group"
+                                onClick={() => fetchDir(item.path)}
+                            >
+                                <div className="flex items-center text-sm">
+                                    <FolderSearch className="h-3.5 w-3.5 mr-2 text-primary/50" />
+                                    <span>{item.name}</span>
+                                </div>
+                                <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="h-6 px-2 text-[10px] opacity-0 group-hover:opacity-100"
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleSelectDir(item.path)
+                                    }}
+                                >
+                                    Select
+                                </Button>
+                            </div>
+                        ))}
+                        {currentDir.items.length === 0 && (
+                            <div className="p-4 text-center text-xs text-muted-foreground italic">No subdirectories found.</div>
+                        )}
+                    </div>
+                    <div className="p-2 border-t flex justify-end">
+                        <Button 
+                            variant="secondary" 
+                            size="sm" 
+                            className="h-7 text-xs"
+                            onClick={() => handleSelectDir(currentDir.current_path)}
+                        >
+                            Select Current Folder
+                        </Button>
+                    </div>
+                </div>
+              )}
+
               {message && (
                 <p className="text-sm text-blue-500">{message}</p>
               )}
